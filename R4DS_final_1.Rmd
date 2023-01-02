@@ -1,0 +1,464 @@
+---
+title: "R4DS_Final"
+author: "Efe Gülkan - Göksel Ediz Yiğit"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+
+```
+
+#setting path and wd
+
+```{r}
+getwd()
+```
+
+#libraries
+
+```{r, warning=FALSE,message=FALSE}
+library(tidyverse)
+library(readxl)
+library(kableExtra)
+library(scales)
+```
+
+#Importing data
+
+```{r,warning=FALSE}
+dataset <- read_xlsx("xutum_data.xlsx")
+
+dataset[,c(4:11)] <- sapply(dataset[,c(4:11)], as.numeric)
+dataset$Dates <- as.character(dataset$Dates)
+
+```
+
+#Dividing by sectors and years
+
+```{r,warning=FALSE}
+dataset %>%
+    group_by(Dates)%>%
+    group_split(Dates)%>%
+    set_names((nm = unique(dataset$Dates))) -> yearly
+
+dataset %>%
+    group_by(Sector)%>%
+    group_split(Sector)%>%
+    set_names((nm = sort(unique(dataset$Sector)))) -> sectorly
+
+
+```
+
+##General Summaries
+
+```{r,warning=FALSE,message=FALSE}
+yearly_summary <- dataset%>%
+    group_by(Dates)%>%
+    summarise(avg_emp = round(mean(`Number of Employees`, na.rm = T),2),
+              sd_emp = round(sd(`Number of Employees`,na.rm=T),2),
+              avg_exp_per = mean(`Personnel Expense Per Employee`, na.rm = T),
+              avg_profit = mean(`Profit Margin`, na.rm = T),
+              avg_sales = mean(Sales, na.rm = T))%>%
+    mutate(emp_index = avg_emp/first(avg_emp),
+           exp_index = avg_exp_per/first(avg_exp_per),
+           profit_index = avg_profit/first(avg_profit),
+           sales_index = avg_sales/first(avg_sales))
+
+sectorly_summary <- dataset%>%
+    group_by(Sector)%>%
+    summarise(avg_emp = round(mean(`Number of Employees`, na.rm = T),2),
+              sd_emp = round(sd(`Number of Employees`,na.rm=T),2),
+              avg_exp_per = round(mean(`Personnel Expense Per Employee`, na.rm = T),2),
+              avg_profit = round(mean(`Profit Margin`, na.rm = T),2),
+              avg_sales = round(mean(Sales, na.rm = T),2))
+
+all_summary <- dataset%>%
+    group_by(Sector, Dates)%>%
+    summarise(avg_emp = round(mean(`Number of Employees`, na.rm = T),2),
+              avg_exp_per = mean(`Personnel Expense Per Employee`, na.rm = T),
+              avg_profit = mean(`Profit Margin`, na.rm = T),
+              avg_sales = mean(Sales, na.rm = T),
+              avg_market_cap = mean(`Market Cap`, na.rm = T)) 
+
+namean <- function(data){
+    mean(data, na.rm = T)
+}
+difference <- dataset%>%
+    filter(Dates %in% c("2015-12-31","2021-12-31"))%>%
+    pivot_wider(id_cols = Sector,
+                values_from = c("Number of Employees","Sales","Profit Margin"),
+                names_from = Dates, 
+                values_fn = namean)
+
+difference <- difference %>% 
+    mutate(emp_change = 100*(`Number of Employees_2021-12-31`- `Number of Employees_2015-12-31`)/`Number of Employees_2015-12-31`,
+           sales_change = 100*(`Sales_2021-12-31`- `Sales_2015-12-31`)/`Sales_2015-12-31`,
+           profit_change = 100*(`Profit Margin_2021-12-31`- `Profit Margin_2015-12-31`)/`Profit Margin_2015-12-31`)
+
+
+unl <- function(data){
+    length(unique(data))
+}
+sector_firms <- aggregate(dataset$Firm, by = list(dataset$Sector),FUN = unl)
+dates_firms <- aggregate(dataset$Firm, by = list(dataset$Dates), FUN = unl)
+
+no_firms <- dataset%>% 
+    group_by(Sector) %>% 
+    summarise(number = length(unique(Firm)))
+
+ratio <- prop.table(no_firms$number)*100
+
+ratio_table <- cbind(no_firms, ratio)
+
+dates_firms %>% 
+    kbl() %>% 
+     kable_styling(bootstrap_options = c("striped", "hover"))
+
+yearly_summary%>%
+    kbl()%>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+
+sectorly_summary%>%
+    kbl()%>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+
+difference%>%
+    kbl()%>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+
+summary(dataset[,4:11])%>%
+    kbl()%>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+
+ratio_table%>%
+    kbl()%>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+#Comparasion of personnel expenses and employment
+
+```{r}
+ylim.emp <- c(1000, 4000)  
+ylim.expens <- c(100000,300000)   
+
+secaxexps <- diff(ylim.emp)/diff(ylim.expens)
+secax_exps <- ylim.emp[1] - secaxexps*ylim.expens[1]
+
+ylim.prof <- c(-600,1800)
+secaxprof <- diff(ylim.emp)/diff(ylim.prof)
+secax_prof <- ylim.emp[1] - secaxprof*ylim.prof[1]
+
+
+exp_vs_emp <- ggplot(yearly_summary, aes(x = Dates, group = 1))+
+    geom_line(aes(y = avg_emp))+
+    geom_line(aes(y = secax_exps+avg_exp_per*secaxexps), color = "red")+
+    geom_point(aes(y = avg_emp),color = "navy")+
+    geom_point(aes(y = secax_exps+avg_exp_per*secaxexps), color = "navy")+
+    scale_y_continuous("Average Employee", sec.axis = sec_axis(~ (. - secax_exps)/secaxexps, name = "Average Expense per Employee"))+
+    theme(axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"))+
+    labs(x = "Years")
+
+
+profit_emp <- ggplot(yearly_summary, aes(x = Dates, group = 1))+
+    geom_line(aes(y = avg_emp))+
+    geom_line(aes(y = secax_prof+avg_profit*secaxprof), color = "red")+
+    geom_point(aes(y = avg_emp),color = "navy")+
+    geom_point(aes(y = secax_prof+avg_profit*secaxprof), color = "navy")+
+    scale_y_continuous("Average Employee", sec.axis = sec_axis(~ (. - secax_prof)/secaxprof, name = "Average Profit"))+
+    theme(axis.line.y.right = element_line(color = "red"), 
+        axis.ticks.y.right = element_line(color = "red"),
+        axis.text.y.right = element_text(color = "red"))+
+    labs(x = "Years",y="Average Profit Margin",title = "Change in Average Profit Margins of BIST TUM Firms",caption = "Source: Bloomberg")
+
+emp_box <- ggplot(dataset, aes(x = Sector))+
+    geom_boxplot(aes(y = `Number of Employees`, color = Dates),show.legend = T, outlier.alpha = 0.2)+
+    lims(y = c(0,30000))+
+    scale_x_discrete(labels = abbreviate)+
+    theme(axis.text.x = element_text(size= 8,angle = 45,hjust = 1, vjust = 1))
+
+exp_emp_index <- ggplot(yearly_summary, aes(x = Dates, group = 1))+
+    geom_line(aes(y = emp_index, color = "Employee Index"))+
+    geom_line(aes(y=exp_index, color = "Average Personnel Expense Index"))+
+    geom_point(aes(y = emp_index))+
+    geom_point(aes(y = exp_index))+
+    theme(legend.position = "bottom")+
+    scale_color_manual(name = "Index",
+                       values = c("red","black"),
+                       labels = c("Average Personnel Expense Index","Employee Index"))+
+    labs(x = "Years",
+         y = "Index",
+         title = "Index comparasion of Employee Number and Average Personnel Expense",caption = "Source: Bloomberg")
+
+sales_change <- ggplot(yearly_summary, aes(x = Dates, group = 1))+
+    geom_line(aes(y = avg_sales))+
+    geom_point(aes(y = avg_sales))+
+    labs(x = "Years",y="Average Sales (thousand)",title = "Change in Average Sales of BIST TUM Firms",caption = "Source: Bloomberg")
+```
+
+
+```{r}
+profit_emp
+exp_emp_index
+sales_change
+```
+
+#Comparasion of Yearly Average Number of Employee by Sector
+
+```{r,warning=FALSE,message=FALSE}
+sectors1 <- c("ACCOMMODATION AND FOOD SERVICE ACTIVITIES","ADMINISTRATIVE AND SUPPORT SERVICE ACTIVITIES","AGRICULTURE, FORESTRY AND FISHING","ARTS, ENTERTAINMENT AND RECREATION","CONSTRUCTION","ELECTRICITY, GAS, STEAM AND AIR CONDITIONING SUPPLY","FINANCIAL AND INSURANCE ACTIVITIES","HUMAN HEALTH AND SOCIAL WORK ACTIVITIES")
+
+sectors2 <- c("INFORMATION AND COMMUNICATION","MANUFACTURING","MINING AND QUARRYING","PROFESSIONAL, SCIENTIFIC AND TECHNICAL ACTIVITIES","REAL ESTATE ACTIVITIES","TRANSPORTATION AND STORAGE","WATER SUPPLY; SEWERAGE, WASTE MANAGEMENT AND REMEDIATION ACTIVITIES","WHOLESALE AND RETAIL TRADE; REPAIR OF MOTOR VEHICLES AND MOTORCYCLES")
+
+sec_emp1 <- ggplot(all_summary%>%
+           filter(avg_market_cap<=1698.35))+
+    geom_point(aes(x= Dates,
+                   y = avg_emp,
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = avg_emp,
+                   color = Sector, group = Sector),show.legend = T)+
+    theme(axis.text.x = element_text(angle = 15),
+    legend.text = element_text(size = 8,vjust = 1, hjust = 0.5), 
+    legend.position = "right",
+    legend.key.width = unit(0.1, "cm"),
+    legend.key.size = unit(0.1, "cm"),
+    legend.spacing = unit(0.01, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(25),
+                               guide = guide_legend(nrow = 16))+
+    lims(y= c(-1000,13000))+
+    ylab("Average Number of Employee")+
+    labs(title = "Change of yearly average Number of Employees",
+         subtitle = "Average Market Cap of Sector lower than the median 1.6 billion liras")
+
+sec_emp2 <- ggplot(all_summary%>%
+           filter(1698.35<avg_market_cap))+
+    geom_point(aes(x= Dates,
+                   y = avg_emp,
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = avg_emp,
+                   color = Sector, group = Sector),show.legend = T)+
+    theme(axis.text.x = element_text(angle = 15),
+    legend.text = element_text(size = 8,vjust = 1, hjust = 0.5), 
+    legend.position = "right",
+    legend.key.width = unit(0.1, "cm"),
+    legend.key.size = unit(0.1, "cm"),
+    legend.spacing = unit(0.01, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(25),
+                               guide = guide_legend(nrow = 16))+
+    lims(y= c(-1000,13000))+
+    ylab("Average Number of Employee")+
+    labs(title = "Change of yearly average Number of Employees",
+         subtitle = "Average Market Cap of Sector higher than the median 1.6 billion liras")
+
+sales_avg_s1 <- ggplot(all_summary %>% 
+            filter(Sector %in% sectors1))+
+    geom_point(aes(x= Dates,
+                   y = log(avg_sales),
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = log(avg_sales),
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(25),
+                               guide = guide_legend(nrow = 8))+
+     labs(x = "Years",y = "Log of Average Sales",title = "Change of Average Sales by Sectors over Years",subtitle = "Alphabetical First 8 Sectors",caption = "Source: Bloomberg")
+ 
+sales_avg_s2 <- ggplot(all_summary %>% 
+            filter(Sector %in% sectors2))+
+    geom_point(aes(x= Dates,
+                   y = log(avg_sales),
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = log(avg_sales),
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(25),
+                               guide = guide_legend(nrow = 8))+
+     labs(x = "Years",y = "Log of Average Sales",title = "Change of Average Sales by Sectors over Years",subtitle = "Alphabetical Latter 8 Sectors",caption = "Source: Bloomberg")
+
+prof_date_s1 <- ggplot(all_summary %>% 
+           filter(!Sector %in% "ELECTRICITY, GAS, STEAM AND AIR CONDITIONING SUPPLY" & Sector %in% sectors1))+
+    geom_point(aes(x= Dates,
+                   y = (avg_profit),
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = (avg_profit),
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15),
+    legend.text = element_text(size = 8,vjust = 0.5, hjust = 0))+
+        scale_colour_viridis_d(option = "turbo",
+                               labels = scales::label_wrap(12),
+                               guide = guide_legend(nrow = 8))+
+    labs(title = "Change of Average Profit Margins by Sectors over Years",subtitle = "Alphabetical First 8 Sectors & Outlier Electricity,Gas,Steam and AC Supply Excluded",caption = "Source: Bloomberg",x = "Years",y="Average Profit Margin")+
+    lims(y = c(-100,200))
+
+prof_date_s2 <- ggplot(all_summary %>% 
+           filter( Sector %in% sectors2))+
+    geom_point(aes(x= Dates,
+                   y = (avg_profit),
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = (avg_profit),
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15),
+    legend.text = element_text(size = 8,vjust = 0.5, hjust = 0))+
+        scale_colour_viridis_d(option = "turbo",
+                               labels = scales::label_wrap(20),
+                               guide = guide_legend(nrow = 8))+
+    lims(y=c(-50,200))+
+    labs(title = "Change of Average Profit Margins by Sectors over Years",subtitle = "Alphabetical Latter 8 Sectors",caption = "Source: Bloomberg",x = "Years",y="Average Profit Margin")
+
+sec_expense_out <- ggplot(all_summary %>% 
+           filter(Sector %in% c("FINANCIAL AND INSURANCE ACTIVITIES","ARTS, ENTERTAINMENT AND RECREATION")))+
+    geom_point(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15))+
+    scale_colour_viridis_d(option = "turbo",
+                               labels = scales::label_wrap(5),
+                               guide = guide_legend(nrow = 2))+
+    labs(x = "Years",y="Average Personnel Expense",title = "Average Personnel Expense by Sectors over Years",subtitle = "Outlier Sectors",caption = "Source: Bloomberg")
+
+sec_expense_s1 <- ggplot(all_summary %>% 
+           filter(!Sector %in% c("FINANCIAL AND INSURANCE ACTIVITIES","ARTS, ENTERTAINMENT AND RECREATION") & Sector %in% sectors1))+
+    geom_point(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector, group = Sector),show.legend = T)+
+     theme(axis.text.x = element_text(angle = 15),
+           legend.text = element_text(size = 8,vjust = 0.5, hjust = 0), 
+    legend.position = "right",
+    legend.key.width = unit(0.3, "cm"),
+    legend.key.size = unit(0.8, "cm"),
+    legend.spacing = unit(2, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               labels = scales::label_wrap(12),
+                               guide = guide_legend(nrow = 8))+
+    labs(x = "Years",y="Average Personnel Expense",title = "Average Personnel Expense by Sectors over Years",subtitle = "Alphabetical First 8 Sector excluding Outliers",caption = "Source: Bloomberg")
+
+sec_expense_s2 <- ggplot(all_summary %>% 
+           filter(!Sector %in% c("FINANCIAL AND INSURANCE ACTIVITIES","ARTS, ENTERTAINMENT AND RECREATION") & Sector %in% sectors2))+
+    geom_point(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector),show.legend = T)+
+    geom_line(aes(x= Dates,
+                   y = avg_exp_per,
+                   color = Sector, group = Sector),show.legend = T)+
+    theme(axis.text.x = element_text(angle = 15),
+    legend.text = element_text(size = 8,vjust = 0.5, hjust = 0), 
+    legend.position = "right",
+    legend.key.width = unit(0.3, "cm"),
+    legend.key.size = unit(0.8, "cm"),
+    legend.spacing = unit(2, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               labels = scales::label_wrap(15),
+                               guide = guide_legend(nrow = 8))+
+    labs(x = "Years",y="Average Personnel Expense",title = "Average Personnel Expense by Sectors over Years",subtitle = "Alphabetical Latter 8 Sector excluding Outliers",caption = "Source: Bloomberg")
+```
+
+
+```{r,warning=FALSE,message=FALSE}
+sec_emp1
+sec_emp2
+sales_avg_s1
+sales_avg_s2
+prof_date_s1
+prof_date_s2
+sec_expense_out
+sec_expense_s1
+sec_expense_s2
+```
+
+#Function for scatter plots of sales and profit
+
+```{r,warning=FALSE}
+profit_emp_point <- function(date,emp_int){
+    ggplot(dataset%>%
+        filter(Dates %in% date),
+        aes(x = `Number of Employees`,
+            y = `Profit Margin`))+
+        geom_point(aes(color = Sector))+
+    theme(
+    legend.text = element_text(size = 6,vjust = 0.5, hjust = 0.5, margin = margin(r = 11)), 
+    legend.position = "right",
+    legend.key.width = unit(0.1, "cm"),
+    legend.key.size = unit(0.1, "cm"),
+    legend.spacing = unit(0.01, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(20),
+                               guide = guide_legend(nrow = 16))+
+        lims(x = emp_int,
+             y = c(-50,200))+
+        labs(title = "Profit - No. of Employee",
+             subtitle = date)
+}
+
+sales_emp_point <- function(date,emp_int){
+    ggplot(dataset%>%
+        filter(Dates %in% date),
+        aes(x = `Number of Employees`,
+            y = log(Sales)))+
+        geom_point(aes(color = Sector))+
+    theme(
+    legend.text = element_text(size = 6,vjust = 0.5, hjust = 0.5, margin = margin(r = 11)), 
+    legend.position = "right",
+    legend.key.width = unit(0.1, "cm"),
+    legend.key.size = unit(0.1, "cm"),
+    legend.spacing = unit(0.01, "cm"))+
+        scale_colour_viridis_d(option = "turbo",
+                               end = 1,
+                               labels = scales::label_wrap(20),
+                               guide = guide_legend(nrow = 16))+
+        lims(x = emp_int)+
+        labs(title = "Sales - No. of Employee",
+             subtitle = date)+
+        ylab("log of Sales (thousand)")
+}
+```
+
+##Yearly profit plots
+
+```{r,warning=FALSE}
+profit_emp_point("2021-12-31",c(10,1000))+
+    geom_smooth(aes(x =`Number of Employees`,
+                    y = `Profit Margin`),
+                se =T, color = "navy")
+
+profit_emp_point("2020-12-31",c(10,1000))+
+    geom_smooth(aes(x =`Number of Employees`,
+                    y = `Profit Margin`),
+                se =T, color = "navy")
+
+profit_emp_point("2020-12-31",c(10,100))+
+    geom_smooth(aes(x =`Number of Employees`,
+                    y = `Profit Margin`),
+                se =T, color = "navy")
+
+sales_emp_point("2019-12-31",c(10,2000))+
+    geom_smooth(aes(x =`Number of Employees`,
+                    y = log(Sales)),
+                    color = "#526788",se =T)
+```
